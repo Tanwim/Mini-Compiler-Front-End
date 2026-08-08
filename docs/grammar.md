@@ -1,407 +1,171 @@
-# Grammar Design
+# Mini Compiler — Full Grammar
 
-## 1. Introduction
+## Notation
+- Nonterminals: UPPER_CAMEL (e.g., Program, Statement)
+- Terminals / tokens: UPPER_SNAKE or literal strings (e.g., IDENTIFIER, INTEGER, '+')
+- EBNF operators:
+  - A | B  — choice
+  - A B    — sequence
+  - A*     — zero or more
+  - A+     — one or more
+  - [A]    — optional A
 
-This document defines the Context-Free Grammar (CFG) of the Mini Compiler Front-End. The grammar specifies the syntax rules for the supported Mini C-like programming language. It will be implemented using Bison (Yacc) during the parser development phase.
+## Token (lexical) summary (lexer responsibilities)
+- Keywords: int, float, char, bool, if, else, while, for, printf, cout
+- IDENTIFIER: /[A-Za-z_][A-Za-z0-9_]*/
+- INTEGER: /[0-9]+/
+- FLOAT_LITERAL: /[0-9]+\.[0-9]+/
+- CHAR_LITERAL: /'(\\.|[^\\'])'/
+- STRING_LITERAL: /"([^"\\]|\\.)*"/
+- BOOL_LITERAL: /true|false/
+- Operators and punctuation: '+', '-', '*', '/', '%', '==', '!=', '<=', '>=', '<', '>', '=', '++', '--', '<<', ',', ';', '(', ')', '{', '}', '<<'
+- Whitespace and comments: skip (space, tab, newline, //..., /*...*/)
 
----
-
-## 2. Start Symbol
-
-```
-Program
-```
-
----
-
-## 3. Program
-
-```
-Program → StatementList
-```
-
-A program consists of one or more statements.
-
----
-
-## 4. Statement List
-
-```
-StatementList → Statement StatementList
-StatementList → ε
-```
-
-A statement list may contain multiple statements or be empty.
+Longest-match rule: recognize multi-char tokens (==, <=, ++, etc.) before single-char ones.
 
 ---
 
-## 5. Statement
+## Grammar (BNF/EBNF) — ordered from start symbol to terminals
 
-```
-Statement → Declaration
-Statement → Assignment
-Statement → SelectionStatement
-Statement → WhileStatement
-Statement → ForStatement
-Statement → PrintStatement
-```
+1. Program
+   Program → StatementList
 
----
+2. Statement list
+   StatementList → Statement StatementList
+   StatementList → ε
+   (equivalently StatementList → Statement*)
 
-## 6. Declaration
+3. Statement (top-level statement choices)
+   Statement → Declaration
+   Statement → AssignmentStatement
+   Statement → SelectionStatement
+   Statement → WhileStatement
+   Statement → ForStatement
+   Statement → PrintStatement
+   Statement → Block
+   Statement → EmptyStatement
 
-```
-Declaration → DataType Identifier ';'
+4. Empty statement
+   EmptyStatement → ';'
 
-Declaration → DataType Identifier '=' Expression ';'
-```
+5. Declaration
+   Declaration → Type IDENTIFIER [ '=' Expression ] ';'
+   Type → 'int' | 'float' | 'char' | 'bool'
 
-### Example
+6. Assignment statement (including increment/decrement postfix)
+   AssignmentStatement → IDENTIFIER '=' Expression ';'
+   AssignmentStatement → IDENTIFIER '++' ';'   // postfix increment as statement
+   AssignmentStatement → IDENTIFIER '--' ';'   // postfix decrement as statement
 
-```c
-int age;
+   (For expressions where ++/-- appear within expressions, treat them as postfix operators in Factor or as separate productions below.)
 
-float cgpa;
+7. Expressions (arithmetic + parentheses + literals + identifiers)
+   Expression → Expression '+' Term
+   Expression → Expression '-' Term
+   Expression → Term
 
-char grade;
+   Term → Term '*' Factor
+   Term → Term '/' Factor
+   Term → Term '%' Factor
+   Term → Factor
 
-bool status;
+   Factor → IDENTIFIER
+   Factor → INTEGER
+   Factor → FLOAT_LITERAL
+   Factor → CHAR_LITERAL
+   Factor → BOOL_LITERAL
+   Factor → STRING_LITERAL
+   Factor → IDENTIFIER '++'      // postfix ++ as expression (optional)
+   Factor → IDENTIFIER '--'      // postfix -- as expression (optional)
+   Factor → '(' Expression ')'
+   Factor → '+' Factor           // unary plus
+   Factor → '-' Factor           // unary minus
 
-int marks = 100;
-```
+8. Number categories (for completeness)
+   Number → INTEGER | FLOAT_LITERAL
 
----
+9. Condition (relational expressions)
+   Condition → Expression RelationalOperator Expression
+   RelationalOperator → '<' | '>' | '<=' | '>=' | '==' | '!='
 
-## 7. Data Type
+10. Selection (if / if-else)
+    SelectionStatement → 'if' '(' Condition ')' Block
+    SelectionStatement → 'if' '(' Condition ')' Block 'else' Block
 
-```
-DataType → int
+11. While loop
+    WhileStatement → 'while' '(' Condition ')' Block
 
-DataType → float
+12. For loop (C-style)
+    ForStatement → 'for' '(' ForInit? ';' Condition? ';' ForPost? ')' Block
 
-DataType → char
+    ForInit → DeclarationNoSemi | AssignmentNoSemi
+    ForPost → AssignmentNoSemi | IDENTIFIER '++' | IDENTIFIER '--'
 
-DataType → bool
-```
+    // Use no-semi variants inside for parentheses:
+    DeclarationNoSemi → Type IDENTIFIER [ '=' Expression ]
+    AssignmentNoSemi → IDENTIFIER '=' Expression
 
----
+13. Print / I/O statements
+    // Simple printf form (arguments as expressions or string + expressions)
+    PrintStatement → 'printf' '(' PrintArgs ')' ';'
+    PrintArgs → (Expression | STRING_LITERAL) (',' (Expression | STRING_LITERAL))*
 
-## 8. Assignment
+    // Simple cout form (C++-style chaining using '<<')
+    PrintStatement → 'cout' CoutChain ';'
+    CoutChain → '<<' CoutItem ( '<<' CoutItem )*
+    CoutItem → Expression | STRING_LITERAL
 
-```
-Assignment → Identifier '=' Expression ';'
-```
+    // Note: lexer must produce '<<' as token
 
-### Example
+14. Block
+    Block → '{' StatementList '}'
 
-```c
-age = 20;
-
-marks = marks + 10;
-```
-
----
-
-## 9. Expression
-
-```
-Expression → Expression '+' Term
-
-Expression → Expression '-' Term
-
-Expression → Term
-```
-
-Expressions perform addition and subtraction.
-
----
-
-## 10. Term
-
-```
-Term → Term '*' Factor
-
-Term → Term '/' Factor
-
-Term → Term '%' Factor
-
-Term → Factor
-```
-
-Terms perform multiplication, division and modulus operations.
-
----
-
-## 11. Factor
-
-```
-Factor → Identifier
-
-Factor → Integer
-
-Factor → Float
-
-Factor → '(' Expression ')'
-```
-
-A factor is the smallest unit of an expression.
+15. Identifier decomposition (lexical — described for lexer)
+    IDENTIFIER → Letter IdentifierTail
+    IdentifierTail → (Letter | Digit | '_' )*
+    Letter → a-z | A-Z | _
+    Digit → 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
 
 ---
 
-## 12. Number
+## Operator precedence & associativity (recommended ordering)
+(from lowest precedence to highest; use Bison %left/%right)
+- assignment: '='                      (right-assoc)
+- relational: '<' '>' '<=' '>=' '==' '!='  (non-assoc)
+- additive: '+' '-'                     (%left)
+- multiplicative: '*' '/' '%'           (%left)
+- unary: unary '+' unary '-'            (right-assoc; give token UMINUS)
+- postfix: IDENTIFIER '++' / '--'       (highest; if treated)
 
-```
-Number → Integer
+Suggested Bison declarations (conceptual):
+%right '='
+%nonassoc LT GT LE GE EQ NE
+%left '+' '-'
+%left '*' '/' '%'
+%right UMINUS
 
-Number → Float
-```
-
----
-
-## 13. Integer
-
-```
-Integer → Digit Integer
-
-Integer → Digit
-```
-
----
-
-## 14. Float
-
-```
-Float → Integer '.' Integer
-```
+Map token names to actual %token entries (e.g., %token IDENTIFIER INTEGER FLOAT_LITERAL).
 
 ---
 
-## 15. Condition
-
-```
-Condition → Expression RelationalOperator Expression
-```
-
-A condition compares two expressions.
+## Error-recovery suggestions
+- Recover at semicolons and closing braces:
+  - Add production: StatementList → StatementList error ';' { yyerrok; }
+  - Add: StatementList → StatementList error '}' { yyerrok; /* maybe push back '}' */ }
+- Report line & column at lexer level for helpful diagnostics.
 
 ---
 
-## 16. Relational Operator
-
-```
-RelationalOperator → <
-
-RelationalOperator → >
-
-RelationalOperator → <=
-
-RelationalOperator → >=
-
-RelationalOperator → ==
-
-RelationalOperator → !=
-```
+## Implementation notes & mapping to Bison/Flex
+- Lexer (Flex): implement token regexes, return token names and semantic values (yylval).
+- Parser (Bison): implement productions, use %union for value types (int, double, char*, AST*).
+- Build AST nodes in parser actions; keep type-checking for a later pass.
+- Tests: create small files covering declarations, assignment, expression precedence, control flow, nested blocks, and print variants.
 
 ---
 
-## 17. Selection Statement
-
-SelectionStatement → if '(' Condition ')' Block
-
-SelectionStatement → if '(' Condition ')' Block else Block
-
-### Example
-
-```c
-if (age >= 18)
-{
-    printf(age);
-}
-```
-
----
-
-## 18. While Statement
-
-```
-WhileStatement → while '(' Condition ')' Block
-```
-
-### Example
-
-```c
-while (age < 30)
-{
-    age = age + 1;
-}
-```
-
----
-
-## 19. For Statement
-
-```
-ForStatement
-→ for '(' AssignmentFor ';' Condition ';' AssignmentFor ')' Block
-
-AssignmentFor → Identifier '=' Expression
-
-AssignmentFor → Identifier ++
-
-AssignmentFor → Identifier --
-```
-
-### Example
-
-```c
-for(i = 0; i < 10; i = i + 1)
-{
-    printf(i);
-}
-```
-
----
-
-## 20. Print Statement
-
-```
-PrintStatement → printf '(' String PrintArguments ')' ';'
-
-PrintStatement → cout CoutArguments ';'
-```
-
-### Example
-
-```c
-printf(age);
-```
-
----
-
-## 21. Block
-
-```
-Block → '{' StatementList '}'
-```
-
-A block contains one or more statements enclosed within braces.
-
----
-
-## 22. Identifier
-
-```
-Identifier → Letter IdentifierTail
-```
-
----
-
-## 23. Identifier Tail
-
-```
-IdentifierTail → Letter IdentifierTail
-
-IdentifierTail → Digit IdentifierTail
-
-IdentifierTail → '_' IdentifierTail
-
-IdentifierTail → ε
-```
-
----
-
-## 24. Letter
-
-```
-Letter → a-z
-
-Letter → A-Z
-
-Letter → _
-```
-
----
-
-## 25. Digit
-
-```
-Digit → 0
-
-Digit → 1
-
-Digit → 2
-
-Digit → 3
-
-Digit → 4
-
-Digit → 5
-
-Digit → 6
-
-Digit → 7
-
-Digit → 8
-
-Digit → 9
-```
-
----
-
-## 26. Supported Grammar Features
-
-This grammar supports the following language constructs:
-
-- Variable Declaration
-- Variable Initialization
-- Variable Assignment
-- Arithmetic Expressions
-- Relational Expressions
-- Selection Statement (if / if-else)
-- While Loop
-- For Loop
-- Print Statement
-- Nested Blocks
-
----
-
-## 27. Current Limitations
-
-The current grammar does not support:
-
-- Logical Operators (&&, ||, !)
-- Functions
-- Arrays
-- Structures
-- Pointers
-- Switch Statement
-- Do-While Loop
-- User-defined Functions
-
-Logical expressions are not yet parsed.
-
----
-
-## 28. Note
-
-This grammar is designed according to the language specification defined in `language_specification.md`. It will be directly implemented in `parser.y` using Bison (Yacc). The current version focuses on building a stable and easy-to-maintain compiler front-end before introducing more advanced language features.
-
-
-## Supported Language
-
-This compiler currently supports:
-
-- C
-- C++
-- Java (Common Syntax Only)
-
-Shared constructs include:
-
-- Variable Declaration
-- Assignment
-- Arithmetic Expressions
-- if / if-else
-- while
-- for
-- printf
-- cout
+## Limitations (current)
+- No logical operators (&&, ||, !). Add as additional precedence layer if needed.
+- No function definitions or calls.
+- No arrays, pointers, structs.
+- Limited printf format-string parsing — currently treat string as literal, expressions separated by commas.
